@@ -1,0 +1,13 @@
+# dependencies
+node_modules/
+
+# temp files
+samples/
+output/
+
+# system files
+.DS_Store
+
+# optional
+.env
+package-lock.json
