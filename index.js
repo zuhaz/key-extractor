@@ -44,9 +44,9 @@ fetch(jsUrl)
       console.log("⏸ Key unchanged");
     }
 
-    cleanup();
+    // cleanup();
   })
   .catch(err => {
     console.error("❌ Error:", err.message);
-    cleanup();
+    // cleanup();
   });

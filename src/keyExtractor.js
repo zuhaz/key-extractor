@@ -1,50 +1,74 @@
 export function extractKey(code) {
   try {
-    // === Try extracting from the new Base64 + atob format ===
-    const base64VarMatch = code.match(/([a-zA-Z_$][\w$]*)\s*=\s*["']([A-Za-z0-9+/=]+)["']/);
+    let extractedParts = [];
+
+    // === [1] Direct atob("...") assignments ===
+    const directAtobMatches = [...code.matchAll(
+      /([a-zA-Z_$][\w$]*)\s*=\s*atob\(["']([A-Za-z0-9+/=]+)["']\)/g
+    )];
+
+    for (const [, varName, base64] of directAtobMatches) {
+      const decoded = Buffer.from(base64, "base64").toString("utf-8");
+      if (/^[a-f0-9]+$/i.test(decoded)) {
+        extractedParts.push(decoded);
+      }
+    }
+
+    // === [1.5] Add known variable M if it exists and is a hex string ===
+    const mMatch = code.match(/\bM\s*=\s*["']([a-f0-9]{16,})["']/i);
+    if (mMatch) {
+      extractedParts.push(mMatch[1]);
+    }
+
+    if (extractedParts.length > 0) {
+      const fullKey = extractedParts.join("");
+      console.log("✅ Extracted Key (direct atob + M):", fullKey);
+      return fullKey;
+    }
+
+    // === [2] Base64 var + atob via function ===
+    const base64VarMatch = code.match(
+      /([a-zA-Z_$][\w$]*)\s*=\s*["']([A-Za-z0-9+/=]+)["']/
+    );
     if (base64VarMatch) {
       const [_, varName, base64Value] = base64VarMatch;
 
       const atobCallRegex = new RegExp(
-        `=\\s*\\(\\)\\s*=>\\s*{[\\s\\S]*?return\\s+atob\\(${varName}\\)`,
+        `=\\s*\\(\\)\\s*=>\\s*{[\\s\\S]*?atob\\(${varName}\\)`,
         "s"
       );
 
       if (atobCallRegex.test(code)) {
         const key = Buffer.from(base64Value, "base64").toString("utf-8");
-        console.log("✅ Extracted Key (Base64 format):", key);
+        console.log("✅ Extracted Key (Base64 var + atob call):", key);
         return key;
       }
     }
 
-    // === Fallback to multi-part literal functions ===
+    // === [3] Multi-part value extraction ===
     const getValue = (name) => {
-      // Direct return: () => { return "abcd" }
       const directReturn = new RegExp(
         `${name}\\s*=\\s*\\(\\)\\s*=>\\s*{[^}]*?return\\s+["']([a-f0-9]+)["']`,
         "s"
       );
-
-      // Flexible multiline return (supports if-else and window calls)
       const flexibleReturn = new RegExp(
         `${name}\\s*=\\s*\\(\\)\\s*=>\\s*{[\\s\\S]*?return\\s+["']([a-f0-9]+)["']`,
         "s"
       );
-
-      // atob return (deprecated: already tried above but kept for redundancy)
       const atobReturn = new RegExp(
-        `${name}\\s*=\\s*\\(\\)\\s*=>\\s*{[\\s\\S]*?return\\s+atob\\((\\w+)\\)`,
+        `${name}\\s*=\\s*\\(\\)\\s*=>\\s*{[\\s\\S]*?atob\\((\\w+)\\)`,
         "s"
       );
 
       const match = code.match(directReturn) || code.match(flexibleReturn);
       if (match) return match[1];
 
-      // fallback base64 decoding
       const atobMatch = code.match(atobReturn);
       if (atobMatch) {
         const varName = atobMatch[1];
-        const varRegex = new RegExp(`${varName}\\s*=\\s*["']([A-Za-z0-9+/=]+)["']`);
+        const varRegex = new RegExp(
+          `${varName}\\s*=\\s*["']([A-Za-z0-9+/=]+)["']`
+        );
         const base64Match = code.match(varRegex);
         if (base64Match) {
           return Buffer.from(base64Match[1], "base64").toString("utf-8");
@@ -70,23 +94,39 @@ export function extractKey(code) {
 
     if (parts.every(Boolean)) {
       const fullKey = parts.join("");
-      console.log("Extracted Key (multi-part format):", fullKey);
+      console.log("✅ Extracted Key (multi-part format):", fullKey);
       return fullKey;
     }
 
-    // === Fallback to legacy H2 structure ===
+    // === [4] Legacy format ===
     const partA = code.match(/H2\["a"\]\s*=\s*"([a-f0-9]+)"/)?.[1];
-    const partB = code.match(/H2\["b"\]\s*=\s*\(\)\s*=>\s*{[^}]*?if\s*\(!window\.T9i\.z1yD8Yo\(\)\)\s*{\s*return\s*"([a-f0-9]+)"/s)?.[1];
+    const partB = code.match(
+      /H2\["b"\]\s*=\s*\(\)\s*=>\s*{[^}]*?if\s*\(!window\.T9i\.z1yD8Yo\(\)\)\s*{\s*return\s*"([a-f0-9]+)"/s
+    )?.[1];
     const partC = code.match(/H2\["c"\]\s*=\s*"([a-f0-9]+)"/)?.[1];
 
     if (partA && partB && partC) {
       const legacyKey = partA + partB + partC;
-      console.log("Extracted Key (legacy H2 format):", legacyKey);
+      console.log("✅ Extracted Key (legacy H2 format):", legacyKey);
       return legacyKey;
     }
 
-    // === If everything fails ===
-    console.error("Could not extract all parts of the key from any format.");
+    // === [5] Final fallback: long hex literals ===
+    const hexLiteralMatches = [...code.matchAll(
+      /([a-zA-Z_$][\w$]*)\s*=\s*["']([a-f0-9]{16,})["']/gi
+    )];
+    const allHexParts = hexLiteralMatches
+      .map(([, varName, hex]) => hex)
+      .filter((hex, i, self) => self.indexOf(hex) === i);
+
+    if (allHexParts.length > 0) {
+      const joined = allHexParts.join("");
+      console.log("✅ Extracted Key (hex literals fallback):", joined);
+      return joined;
+    }
+
+    // === If all failed ===
+    console.error("❌ Could not extract key from any format.");
     console.table({ T, D, s, Z, J, A, v, o, n, S, g, partA, partB, partC });
     return null;
   } catch (e) {
