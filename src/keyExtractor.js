@@ -2,11 +2,34 @@ export function extractKey(code) {
   try {
     let extractedParts = [];
 
+    // === [0] CharCode Array + fromCharCode inside a function ===
+    const arrayRegex = /([a-zA-Z_$][\w$]*)\s*=\s*\[((?:\d{1,3},?\s*)+)\];/g;
+    const arrayMap = new Map();
+
+    for (const match of code.matchAll(arrayRegex)) {
+      const [, name, values] = match;
+      const nums = values.split(",").map((n) => parseInt(n.trim(), 10));
+      arrayMap.set(name, nums);
+    }
+
+    const funcCharCodeRegex = /return\s+String\s*\[\s*["']fromCharCode["']\s*\]\s*\(\s*\.\.\.([a-zA-Z_$][\w$]*)\s*\)/;
+    const funcMatch = code.match(funcCharCodeRegex);
+
+    if (funcMatch) {
+      const arrayName = funcMatch[1];
+      if (arrayMap.has(arrayName)) {
+        const decoded = String.fromCharCode(...arrayMap.get(arrayName));
+        if (/^[a-f0-9]{16,}$/i.test(decoded)) {
+          console.log("✅ Extracted Key (char code + function):", decoded);
+          return decoded;
+        }
+      }
+    }
+
     // === [1] Direct atob("...") assignments ===
     const directAtobMatches = [...code.matchAll(
       /([a-zA-Z_$][\w$]*)\s*=\s*atob\(["']([A-Za-z0-9+/=]+)["']\)/g
     )];
-
     for (const [, varName, base64] of directAtobMatches) {
       const decoded = Buffer.from(base64, "base64").toString("utf-8");
       if (/^[a-f0-9]+$/i.test(decoded)) {
@@ -32,12 +55,10 @@ export function extractKey(code) {
     );
     if (base64VarMatch) {
       const [_, varName, base64Value] = base64VarMatch;
-
       const atobCallRegex = new RegExp(
         `=\\s*\\(\\)\\s*=>\\s*{[\\s\\S]*?atob\\(${varName}\\)`,
         "s"
       );
-
       if (atobCallRegex.test(code)) {
         const key = Buffer.from(base64Value, "base64").toString("utf-8");
         console.log("✅ Extracted Key (Base64 var + atob call):", key);
@@ -91,7 +112,6 @@ export function extractKey(code) {
     const g = getValue("g");
 
     const parts = [T, D, s, Z, J, A, v, o, n, S, g];
-
     if (parts.every(Boolean)) {
       const fullKey = parts.join("");
       console.log("✅ Extracted Key (multi-part format):", fullKey);
